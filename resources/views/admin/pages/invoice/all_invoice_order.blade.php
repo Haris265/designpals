@@ -154,9 +154,9 @@
                 width="200" />
 
             <h3 style="margin-top: 20px">INVOICE NO: 
-                {{-- @if ($invoice) --}}
-                    {{ $namePrefix }}
-                {{-- @endif --}}
+                @if ($invoice)
+                    {{ $invoice->invoice_no }}
+                @endif
             </h3>
 
 

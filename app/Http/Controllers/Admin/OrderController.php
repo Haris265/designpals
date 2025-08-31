@@ -154,7 +154,7 @@ class OrderController extends Controller
                 ->addColumn('action', function ($order) {
                     return '
                         <a class="fa fa-edit" href="' . route('admin.edit.order', $order->id) . '"></a>
-                        <a class="fa fa-trash" href="' . route('admin.delete.order', $order->id) . '"></a>
+                        <a class="fa fa-trash delete-btn" href="' . route('admin.delete.order', $order->id) . '"></a>
                     ';
                 })
                 ->editColumn('status', function ($order) {

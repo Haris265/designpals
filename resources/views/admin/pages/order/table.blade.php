@@ -37,7 +37,7 @@
                 </div>
 
             </h5>
-            {{-- <div class="table-responsive text-nowrap">
+           {{-- <div class="table-responsive text-nowrap">
                 <table class="table table-hover w-100" id="table">
                     <thead>
                         <tr>
@@ -87,7 +87,7 @@
                 </table>
 
             </div> --}}
-            <div class="table-responsive text-nowrap">
+             <div class="table-responsive text-nowrap">
                 <table class="table table-hover w-100" id="orders-table">
                     <thead>
                         <tr>
@@ -143,7 +143,7 @@
     });
 </script>
 
-<script>
+ <script>
     $(document).ready(function() {
         $('#orders-table').DataTable({
             processing: true,
@@ -158,7 +158,8 @@
                 { data: 'price', name: 'price' },
                 { data: 'status', name: 'status' },
                 { data: 'type', name: 'type' },
-                { data: 'action', name: 'action', orderable: true, searchable: false },
+                { data: 'action', name: 'action', orderable: false, searchable: false },
+                
             ],
             order: [[0, 'desc']],
         });
@@ -166,5 +167,33 @@
         
     });
 </script>
+
+<script>
+$(document).on("click", ".delete-btn", function(e) {
+    e.preventDefault();
+    var url = $(this).attr("href");
+
+    Swal.fire({
+        title: "Are you sure?",
+        text: "This order will be permanently deleted!",
+        icon: "warning",
+        showCancelButton: true,
+        confirmButtonColor: "#3085d6",
+        cancelButtonColor: "#d33",
+        confirmButtonText: "Yes, delete it!"
+    }).then((result) => {
+        if (result.isConfirmed) {
+            window.location.href = url; // normal delete redirect
+            
+            setTimeout(function() {
+                location.reload();
+            }, 1000);
+        }
+    });
+});
+
+
+</script>
+
 
 @endpush
