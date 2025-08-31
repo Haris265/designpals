@@ -1,0 +1,6 @@
+ns1.dns-parking.com
+
+ns2.dns-parking.com
+
+ns1.orangehost.com
+ns2.orangehost.com

@@ -1,0 +1,906 @@
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use App\Models\Order;
+use App\Models\Client;
+use App\Models\Downloaded;
+use App\Models\DownloadInvoice;
+use App\Models\DownloadedOrder;
+use App\Models\Invoice;
+// use App\Models\User;
+use PDF;
+use Validator;
+use Carbon\Carbon;
+use Yajra\DataTables\Facades\DataTables;
+use Illuminate\Support\Arr;
+use ZipArchive;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use DB;
+use Str;
+
+
+
+class InvoiceController extends Controller
+{
+    //
+    public function all_pdfs_invoices_download(Request $request)
+    {
+        $invoices = $request->invoices;
+    $zipFileName = 'invoices.zip';
+    $zipPath = storage_path('app/public/' . $zipFileName);
+
+    $zip = new ZipArchive;
+
+
+        if ($zip->open($zipPath, ZipArchive::CREATE) === TRUE) {
+            foreach ($invoices as $invoiceNo) {
+                $filePath = storage_path("app/invoices/{$invoiceNo}.pdf"); // Adjust path as needed
+                if (file_exists($filePath)) {
+                    $zip->addFile($filePath, "{$invoiceNo}.pdf");
+                }
+            }
+            $zip->close();
+        }
+
+        if (!file_exists($zipPath)) {
+            return response()->json(['error' => 'File not found.'], 404);
+        }
+
+        return response()->json(['download_url' => asset("storage/$zipFileName")]);
+    }
+
+    public function find_all_downloaded_orders_invoice($id)
+    {
+        // dd()
+        // dd($id);
+        // $invoice = DownloadInvoice::where('client_id',$id)->first();
+        // dd($invoice);
+        $invoices = Downloaded::with('client', 'invoice', 'downloadedOrder.order')->where('id', $id)->first();
+        // $invoices->each(fn($invoice) => 
+        $invoices->total_price = $invoices->downloadedOrder->sum(fn($downloadedOrder) => $downloadedOrder->order->price ?? 0);
+        // );
+        $client = $invoices->client;
+        $invoice = $invoices->invoice;
+
+
+        // $client = Client::with(['order' => function ($query) use ($invoice) {
+        //     $query->whereBetween('date', [$invoice->date, $invoice->end_date]);
+        //     if ($invoice->excluding) {
+        //         $query->whereRaw("Date(date) != Date('{$invoice->excluding}')");
+        //     }
+        // }])->where('id', $invoice->client_id)->first();
+        // dd($client);
+        // dd($invoice);
+        $month_name = \Carbon\Carbon::parse($invoices->start_date)->format('M Y');
+        // dd($month_name);
+        // $from = \Carbon\Carbon::parse(request()->get('from'))->startOfDay();
+        // $till = \Carbon\Carbon::parse(request()->get('till'))->endOfDay();
+        // dd($from);
+        // $from= $from->subDay();
+        // $till = $till->addDay();
+        // dd($from,$till);
+        // 🟢 Fetch orders in the given date range
+        // $orders = Order::whereBetween('date', [$from, $till])
+        //     ->with('client_order')
+        //     ->limit(10)
+        //     ->get();
+        // dd($invoice->excluding);
+
+        // dd($client, Client::find($id));
+        // Extract client name and invoice month
+        $client_name = $client->name;
+        $client_id = $client->id;
+        // dd($client_name);
+        $clientNameParts = explode(' ', $client_name);
+        $firstName = isset($clientNameParts[0]) ? Str::upper(substr($clientNameParts[0], 0, 1)) : '';
+
+        // Generate name prefix
+        $namePrefix = $firstName . '-' . $client_id . '-' . '001';
+        // dd($namePrefix);
+
+
+        // Assuming 'name' is the column for the client name
+        // $month_name = \Carbon\Carbon::parse($invoice->date)->format('F Y'); // Example: 'January 2024'
+
+        // Pass data to the view
+        $pdf = PDF::loadView('admin.pages.invoice.downloaded_invoice_order', compact('namePrefix', 'client_id', 'client', 'invoice', 'client_name', 'month_name', 'invoices'));
+
+        return $pdf->stream($client_name . ' ' . $month_name . ' invoice.pdf');
+    }
+
+    public function downloaded_view_invoice(Request $request)
+    {
+        $invoices = Downloaded::with('client', 'invoice')->get();
+        // dd($invoices);
+
+        // $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
+        // // dd($orders);
+        // $clients = Client::all();
+        // // $pag_count = Invoice::count();
+        // $pag_count = request()->get('per_page', 10);
+        // $invoices = Invoice::with('client')->paginate($pag_count);
+        // dd($invoices); 
+        // if ($request->ajax()) {
+        //     $invoices = Invoice::with('client');
+        //     return DataTables::of($invoices)->filter(function ($query) use ($request) {
+        //         if ($request->has('search') && !empty($request->search['value'])) {
+        //             $searchTerm = $request->search['value'];
+
+        //             $query->where(function ($q) use ($searchTerm) {
+        //                 $q->where('id', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhere('invoice_no', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhere('status', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhereRaw("DATE_FORMAT(date, '%Y-%m-%d') LIKE ?", ["%{$searchTerm}%"])
+        //                     ->orWhereRaw("DATE_FORMAT(end_date, '%Y-%m-%d') LIKE ?", ["%{$searchTerm}%"])
+        //                     ->orWhere('invoice_type', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhere('price', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhereHas('client', function ($q) use ($searchTerm) {
+        //                         return $q->where('name', 'LIKE', "%{$searchTerm}%");
+        //                     });
+        //             });
+        //         }
+        //     })
+        //         ->addColumn('client_name', function ($invoice) {
+        //             return $invoice->client->name;
+        //         })
+        //         ->editColumn('date', function ($invoice) {
+        //             return \Carbon\Carbon::parse($invoice->date)->format('Y-m-d');
+        //         })
+        //         ->editColumn('end_date', function ($invoice) {
+        //             return \Carbon\Carbon::parse($invoice->end_date)->format('Y-m-d');
+        //         })
+        //         ->addColumn('action', function ($invoice) {
+        //             $editUrl = route('admin.edit.invoice', ['id' => $invoice->id]);
+        //             $deleteUrl = route('admin.delete.invoice', ['id' => $invoice->id]);
+        //             $printUrl = route('admin.invoice.generate', ['id' => $invoice->id]);
+
+        //             return '<a class="fa fa-edit" href="'.$editUrl.'"></a>
+        //                     <a class="fa fa-trash" href="'.$deleteUrl.'"></a>
+        //                     <a class="fa fa-print" href="'.$printUrl.'" target="_blank"></a>';
+        //         })
+        //         ->rawColumns(['action'])
+        //         ->make(true);
+        // }
+
+        $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
+        $clients = Client::all();
+        $invoices = Downloaded::with('client', 'invoice', 'downloadedOrder.order')->get();
+        $invoices->each(
+            fn($invoice) =>
+            $invoice->total_price = $invoice->downloadedOrder->sum(fn($downloadedOrder) => $downloadedOrder->order->price ?? 0)
+        );
+
+        // dd($invoices);
+
+        // if ($request->ajax()) {
+        //     $invoices = Downloaded::with('client', 'invoice')->get();
+
+        //     return DataTables::of($invoices)
+        //         ->filter(function ($query) use ($request) {
+        //             if ($request->has('search') && !empty($request->search['value'])) {
+        //                 $searchTerms = explode(' ', $request->search['value']); // Split search string into terms
+
+        //                 foreach ($searchTerms as $term) {
+        //                     $query->where(function ($q) use ($term) {
+        //                         $q->where('id', 'LIKE', "%{$term}%")
+        //                             ->orWhere('invoice_no', 'LIKE', "%{$term}%")
+        //                             ->orWhere('status', 'LIKE', "%{$term}%")
+        //                             ->orWhereRaw("DATE_FORMAT(date, '%Y-%m-%d') LIKE ?", ["%{$term}%"])
+        //                             ->orWhereRaw("DATE_FORMAT(end_date, '%Y-%m-%d') LIKE ?", ["%{$term}%"])
+        //                             ->orWhere('invoice_type', 'LIKE', "%{$term}%")
+        //                             ->orWhere('price', 'LIKE', "%{$term}%")
+        //                             ->orWhereHas('client', function ($q) use ($term) {
+        //                                 $q->where('name', 'LIKE', "%{$term}%");
+        //                             });
+        //                     });
+        //                 }
+        //             }
+        //         })
+        //         ->addColumn('client_name', function ($invoice) {
+        //             return $invoice->client->name ?? 'N/A';
+        //         })
+        //         ->editColumn('date', function ($invoice) {
+        //             return \Carbon\Carbon::parse($invoice->date)->format('Y-m-d');
+        //         })
+        //         ->editColumn('end_date', function ($invoice) {
+        //             return \Carbon\Carbon::parse($invoice->end_date)->format('Y-m-d');
+        //         })
+        //         ->addColumn('action', function ($invoice) {
+        //             $editUrl = route('admin.edit.invoice', ['id' => $invoice->id]);
+        //             $deleteUrl = route('admin.delete.invoice', ['id' => $invoice->id]);
+        //             $printUrl = route('admin.all.invoice.generate', ['id' => $invoice->id]);
+
+        //             return '<a class="fa fa-edit" href="' . $editUrl . '"></a>
+        //                     <a class="fa fa-trash" href="' . $deleteUrl . '"></a>
+        //                     <a class="fa fa-print" href="' . $printUrl . '" target="_blank"></a>';
+        //         })
+        //         ->rawColumns(['action'])
+        //         ->make(true);
+        // }
+        // return view('admin.pages.invoice.table', compact('orders', 'clients'));
+        return view('admin.pages.invoice.downloaded', compact('orders', 'clients', 'invoices'));
+    }
+
+    public function download_invoice(Request $request)
+    {
+        // $invoices = Invoice::whereBetween('date', [$request->get('from'), $request->get('till')])
+        // ->get();
+        $invoices = DownloadInvoice::with('client')
+            ->where(function ($query) use ($request) {
+                $query->where('date', [$request->get('from'), $request->get('till')])
+                    ->orWhereBetween('end_date', [$request->get('from'), $request->get('till')]);
+            })
+            ->get();
+        // dd($invoices);
+        return view('admin.pages.invoice.download_invoices', compact('invoices'));
+    }
+
+    // public function download_invoice_process(Request $request)
+    // {
+    //     // $invoices = Invoice::whereBetween('date', [$request->get('from'), $request->get('till')])
+    //     // ->get();
+    //     $invoices = DownloadInvoice::with('client.order')
+    //         ->where(function ($query) use ($request) {
+    //             $query->whereBetween('date', [$request->get('from'), $request->get('till')])
+    //                 ->orWhereBetween('end_date', [$request->get('from'), $request->get('till')]);
+    //         })
+    //         ->whereHas('client', function ($query) {
+    //             $query->whereHas('order'); // Sirf un clients ke invoices jinke paas orders hain
+    //         })
+    //         ->get();
+    //         // dd($invoices);
+    //         // dd($request);
+    //     return view('admin.pages.invoice.download_invoices', compact('invoices', 'request'));
+    // }
+
+    // public function download_invoice_process(Request $request)
+    // {
+    //     $from = $request->get('from');  // Example: 2025-02-01
+    //     $till = $request->get('till');  // Example: 2025-02-28
+
+    //     // Pehle un clients ko fetch karo jinke orders selected date range me hain
+    //     $clientsWithOrders = Client::whereHas('order', function ($query) use ($from, $till) {
+    //         $query->whereBetween('date', [$from, $till]);
+    //     })->pluck('id');
+
+    //     // Ab un clients ke saare invoices fetch karo jo given date range me hain
+    //     $invoices = DownloadInvoice::with(['client.order'])
+    //         ->whereIn('client_id', $clientsWithOrders)
+    //         ->whereBetween('date', [$from, $till]) // Invoices bhi given date range me filter hon
+    //         ->orderBy('date', 'asc')
+    //         ->get()
+    //         ->unique('client_id');
+
+    //     // Unique Clients Count
+    //     $clientCount = $clientsWithOrders->count();
+
+    //     // Total Orders Count
+    //     $orderCount = Order::whereIn('client_id', $clientsWithOrders)
+    //         ->whereBetween('date', [$from, $till])
+    //         ->count();
+
+    //     return view('admin.pages.invoice.download_invoices', compact('invoices', 'request', 'clientCount', 'orderCount'));
+    // }
+
+    public function download_invoice_process(Request $request)
+    {
+        $from = \Carbon\Carbon::parse($request->get('from'))->startOfDay()->format('Y-m-d');
+        $till = \Carbon\Carbon::parse($request->get('till'))->endOfDay()->format('Y-m-d');
+        // $from = $from->subDay();
+        // $till = $till->addDay();
+        // 🟢 Fetch orders in the given date range
+        $orders = Order::whereBetween('date', [$from, $till])
+            ->with('client_order')
+            // ->limit(10)
+            ->get();
+        $clients = Client::whereHas('order', function ($query) use ($from, $till) {
+            $query->whereBetween('date', [$from, $till]);
+        })->with(['order' => function ($query) use ($from, $till) {
+            $query->whereBetween('date', [$from, $till]);
+        }])
+            ->withSum(['order as total_order_price' => function ($query) use ($from, $till) {
+                $query->whereBetween('date', [$from, $till]);
+            }], 'price')
+            ->get();
+        // Client::
+        // dd($orders);
+        // dd($clients->where('id', 1385));
+        // 🟢 Unique client IDs
+        $clientsWithOrders = $orders->pluck('client_id')->unique();
+
+        if ($clientsWithOrders->isEmpty()) {
+            return response()->json(['message' => 'No clients found in the selected date range.'], 404);
+        }
+
+        // 🟢 Group Invoices by Month & Client
+        $invoices = $orders->groupBy(function ($order) {
+            return \Carbon\Carbon::parse($order->date)->format('M Y'); // ✅ Month-Year format e.g., "Mar 2025"
+        })->map(function ($monthlyOrders, $monthYear) use ($request) {
+            return $monthlyOrders->groupBy('client_id')->map(function ($clientOrders, $clientId) use ($monthYear) {
+                $firstOrder = $clientOrders->first();
+                return (object) [
+                    'id' => $clientId,
+                    'invoice_no' => 'INV-' . strtoupper(Str::random(6)) . '-' . $clientId,
+                    'client' => (object) ['name' => optional($firstOrder->client_order)->name],
+                    'from' => \Carbon\Carbon::parse($firstOrder->date)->format('d/m/Y'),
+                    'till' => \Carbon\Carbon::parse($firstOrder->date)->format('d/m/Y'),
+                    'invoice_type' => 'Generated from Orders',
+                    'status' => 'Pending',
+                    'symbol' => '$',
+                    'price' => $clientOrders->sum('price'),
+                    'month' => $monthYear,
+                    'edit_link' => route('admin.edit.download.invoice', ['id' => $clientId, 'month' => $monthYear]), // ✅ Month Added
+                    'download_link' => route('admin.all.invoice.generate', ['id' => $clientId, 'month' => $monthYear]), // ✅ Month Added
+                ];
+            });
+        });
+
+        return view('admin.pages.invoice.download_invoices', compact('invoices', 'request', 'clients', 'from', 'till'));
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    public function download_exclude_invoice_process(Request $request)
+    {
+        // Validate request
+        $request->validate([
+            'invoice_id' => 'required|exists:invoices,id',
+            'exclude_dates' => 'nullable|array',
+            'exclude_dates.*' => 'date',
+        ]);
+
+        // Get invoice and excluded dates
+        $invoice = DownloadInvoice::findOrFail($request->invoice_id);
+        // $excludeDates = $request->exclude_dates[$invoice->id] ?? [];
+
+        // Fetch client and related orders excluding selected dates
+        $client = Client::with(['order' => function ($query) use ($invoice, $request) {
+            // Filter orders within the invoice date range
+            $query->whereBetween('date', [$invoice->date, $invoice->end_date]);
+
+            // Exclude the selected dates
+            if ($request->filled('exclude_dates')) {
+                $query->whereNotIn(DB::raw('DATE(date)'), $request->exclude_dates);
+            }
+        }])->where('id', $invoice->client_id)->first();
+
+        // Prepare PDF data
+        $client_name = $client->name ?? 'Client'; // Fallback if client name is null
+        $month_name = \Carbon\Carbon::parse($invoice->date)->format('F Y'); // Example: January 2024
+
+        // Generate PDF
+        $pdf = PDF::loadView('admin.pages.invoice.all_invoice_order', compact('client', 'invoice', 'client_name', 'month_name'));
+
+        // Download the PDF
+        return $pdf->download($client_name . ' ' . $month_name . ' invoice.pdf');
+    }
+
+
+
+    public function add_invoice()
+    {
+        $clients = Client::with('invoices')->get();
+        // dd($clients);
+        return view('admin.pages.invoice.add', compact('clients'));
+    }
+
+    public function edit_invoice($id)
+    {
+        $clients = Client::all();
+        $invoice = Invoice::find($id);
+        return view('admin.pages.invoice.edit', compact('invoice', 'clients'));
+    }
+
+    public function edit_download_invoice($id)
+    {
+        $clients = Client::all();
+        $invoice = Downloaded::find($id);
+        return view('admin.pages.invoice.download_invoice_edit', compact('invoice', 'clients'));
+    }
+
+    public function delete_invoice($id)
+    {
+        $invoice = Invoice::find($id);
+        $invoice->delete();
+        return redirect()->back()->with(['success' => "Invoice Successfully Deleted"]);
+    }
+
+    public function client_all_invoices_view(Request $request)
+    {
+        $all_invoices = Client::with('invoices')
+            ->where('name', $request->name)
+            ->first();
+        // dd($all_invoices);
+        //$invoice = Invoice::find($id);
+        return view('admin.pages.invoice.view_client_all_invoices', compact('all_invoices'));
+    }
+
+    public function add_invoice_no($id)
+    {
+        $invoice_no = Order::where('id', $id)->first();
+        // dd($invoice_no);
+        return view('admin.pages.invoice.add_invoice_no', compact('invoice_no'));
+    }
+
+    public function view_invoice(Request $request)
+    {
+        // $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
+        // // dd($orders);
+        // $clients = Client::all();
+        // // $pag_count = Invoice::count();
+        // $pag_count = request()->get('per_page', 10);
+        // $invoices = Invoice::with('client')->paginate($pag_count);
+        // dd($invoices); 
+        // if ($request->ajax()) {
+        //     $invoices = Invoice::with('client');
+        //     return DataTables::of($invoices)->filter(function ($query) use ($request) {
+        //         if ($request->has('search') && !empty($request->search['value'])) {
+        //             $searchTerm = $request->search['value'];
+
+        //             $query->where(function ($q) use ($searchTerm) {
+        //                 $q->where('id', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhere('invoice_no', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhere('status', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhereRaw("DATE_FORMAT(date, '%Y-%m-%d') LIKE ?", ["%{$searchTerm}%"])
+        //                     ->orWhereRaw("DATE_FORMAT(end_date, '%Y-%m-%d') LIKE ?", ["%{$searchTerm}%"])
+        //                     ->orWhere('invoice_type', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhere('price', 'LIKE', "%{$searchTerm}%")
+        //                     ->orWhereHas('client', function ($q) use ($searchTerm) {
+        //                         return $q->where('name', 'LIKE', "%{$searchTerm}%");
+        //                     });
+        //             });
+        //         }
+        //     })
+        //         ->addColumn('client_name', function ($invoice) {
+        //             return $invoice->client->name;
+        //         })
+        //         ->editColumn('date', function ($invoice) {
+        //             return \Carbon\Carbon::parse($invoice->date)->format('Y-m-d');
+        //         })
+        //         ->editColumn('end_date', function ($invoice) {
+        //             return \Carbon\Carbon::parse($invoice->end_date)->format('Y-m-d');
+        //         })
+        //         ->addColumn('action', function ($invoice) {
+        //             $editUrl = route('admin.edit.invoice', ['id' => $invoice->id]);
+        //             $deleteUrl = route('admin.delete.invoice', ['id' => $invoice->id]);
+        //             $printUrl = route('admin.invoice.generate', ['id' => $invoice->id]);
+
+        //             return '<a class="fa fa-edit" href="'.$editUrl.'"></a>
+        //                     <a class="fa fa-trash" href="'.$deleteUrl.'"></a>
+        //                     <a class="fa fa-print" href="'.$printUrl.'" target="_blank"></a>';
+        //         })
+        //         ->rawColumns(['action'])
+        //         ->make(true);
+        // }
+
+        $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
+        $clients = Client::all();
+
+        if ($request->ajax()) {
+            $invoices = Invoice::with('client');
+
+            return DataTables::of($invoices)
+                ->filter(function ($query) use ($request) {
+                    if ($request->has('search') && !empty($request->search['value'])) {
+                        $searchTerms = explode(' ', $request->search['value']); // Split search string into terms
+
+                        foreach ($searchTerms as $term) {
+                            $query->where(function ($q) use ($term) {
+                                $q->where('id', 'LIKE', "%{$term}%")
+                                    ->orWhere('invoice_no', 'LIKE', "%{$term}%")
+                                    ->orWhere('status', 'LIKE', "%{$term}%")
+                                    ->orWhereRaw("DATE_FORMAT(date, '%Y-%m-%d') LIKE ?", ["%{$term}%"])
+                                    ->orWhereRaw("DATE_FORMAT(end_date, '%Y-%m-%d') LIKE ?", ["%{$term}%"])
+                                    ->orWhere('invoice_type', 'LIKE', "%{$term}%")
+                                    ->orWhere('price', 'LIKE', "%{$term}%")
+                                    ->orWhereHas('client', function ($q) use ($term) {
+                                        $q->where('name', 'LIKE', "%{$term}%");
+                                    });
+                            });
+                        }
+                    }
+                })
+                ->addColumn('client_name', function ($invoice) {
+                    return $invoice->client->name ?? 'N/A';
+                })
+                ->editColumn('date', function ($invoice) {
+                    return \Carbon\Carbon::parse($invoice->date)->format('Y-m-d');
+                })
+                ->editColumn('end_date', function ($invoice) {
+                    return \Carbon\Carbon::parse($invoice->end_date)->format('Y-m-d');
+                })
+                ->addColumn('action', function ($invoice) {
+                    $editUrl = route('admin.edit.invoice', ['id' => $invoice->id]);
+                    $deleteUrl = route('admin.delete.invoice', ['id' => $invoice->id]);
+                    $printUrl = route('admin.invoice.generate', ['id' => $invoice->id]);
+
+                    return '<a class="fa fa-edit" href="' . $editUrl . '"></a>
+                            <a class="fa fa-trash" href="' . $deleteUrl . '"></a>
+                            <a class="fa fa-print" href="' . $printUrl . '" target="_blank"></a>';
+                })
+                ->rawColumns(['action'])
+                ->make(true);
+        }
+        // return view('admin.pages.invoice.table', compact('orders', 'clients'));
+        return view('admin.pages.invoice.table', compact('orders', 'clients'));
+    }
+
+    public function paid_view_invoice()
+    {
+        $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
+        // dd($orders);
+        $clients = Client::all();
+        $invoices = Invoice::with('client')->where('status', 'Paid')->get();
+        // dd($invoices);
+
+        return view('admin.pages.invoice.paid_invoices_table', compact('orders', 'clients', 'invoices'));
+    }
+
+    public function generate_invoice($id)
+    {
+        $invoice = Invoice::with('designer_order', 'client_order')
+            ->where('status', 'Order Completed')
+            ->find($id);
+        // dd($invoice);
+        $pdf = PDF::loadView('admin.pages.invoice.invoice_pdf', compact('invoice'))->setPaper('A4');
+        return $pdf->stream('invoice.pdf');
+    }
+
+    public function find_all_invoices(Request $request)
+    {
+        // $all_invoices = Invoice::with('client')
+        //     ->whereRelation('client', 'email', $request->client_email)
+        //     ->whereBetween('date', [$request->get('from'), $request->get('till')])
+        //     ->orderBy('id', 'ASC')
+        //     ->get();
+
+
+        $client = Client::with(['order' => function ($query) use ($request) {
+            $query->whereBetween('date', [$request->get('from'), $request->get('till')]);
+        }])->where('email', $request->client_email)->first();
+        $invoice = Invoice::where('client_id', $client->id)->latest()->first();
+        //    dd($invoice);
+        //dd($sum);
+        $invoice_name = substr($client->name, 0, 2);
+        $invoice_name = strtoupper($invoice_name);
+        $sum = $client->order->sum('price');
+        // dd($sum);
+        // dd($all_invoices);
+        $pdf = PDF::loadView('admin.pages.invoice.all_invoices', compact('client', 'sum', 'invoice', 'invoice_name', 'request'));
+        return $pdf->stream('invoice.pdf');
+    }
+
+    public function find_all_orders($id)
+    {
+        $invoice = Invoice::find($id);
+        $client = Client::with(['order' => function ($query) use ($invoice) {
+            $query->whereBetween('date', [$invoice->date, $invoice->end_date]);
+            if ($invoice->excluding) $query->whereRaw("Date(date) != Date('{$invoice->excluding}')");
+            // dd($query->toSql(), $query->getBindings());   
+        }])->where('id', $invoice->client_id)->first();
+        //    dd($invoice);
+        $client_name = $client->name; // Assuming 'name' is the column for the client name
+        $month_name = \Carbon\Carbon::parse($invoice->date)->format('F Y');
+        $pdf = PDF::loadView('admin.pages.invoice.old_all_invoice_order', compact('client', 'invoice', 'client_name', 'month_name'));
+        return $pdf->stream('invoice.pdf');
+    }
+
+    public function find_all_orders_invoice($id)
+    {
+        $invoice = DownloadInvoice::where('client_id', $id)->first();
+        // $invoice = DownloadInvoice::find($id);
+        // dd($invoice);
+        $month_name = \Carbon\Carbon::parse(request()->get('from'))->format('M Y');
+        // dd($month_name);
+        $from = \Carbon\Carbon::parse(request()->get('from'))->startOfDay()->format('Y-m-d');
+        $till = \Carbon\Carbon::parse(request()->get('till'))->endOfDay()->format('Y-m-d');
+        $client = Client::query()
+            ->with(['order' => function ($query) use ($from, $till, $invoice) {
+                $query->where('date', '>=', $from)->where('date', '<=', $till);
+                if ($invoice->excluding) {
+                    $query->whereRaw("Date(date) != Date('{$invoice->excluding}')");
+                }
+            }])
+            ->withSum(['order as total_order_price' => function ($query) use ($from, $till, $invoice) {
+                $query->where('date', '>=', $from)->where('date', '<=', $till);
+                if ($invoice->excluding) {
+                    $query->whereRaw("Date(date) != Date('{$invoice->excluding}')");
+                }
+            }], 'price')
+            ->where('id', $id)->first();
+        //  dd($client, Client::find($id));
+        $downloaded = Downloaded::where('client_id', $invoice->client_id)->where('start_date', $from)->where('end_date', $till)->first();
+        if ($downloaded == null) {
+            $downloaded = Downloaded::create([
+                'invoice_id' => $invoice->id,
+                'client_id' => $id,
+                'start_date' => $from,
+                'end_date' => $till,
+            ]);
+        }
+        if ($client && count($client->order)) {
+            foreach ($client->order as $order) {
+                $download_order = DownloadedOrder::where('downloaded_id', $downloaded->id)->where('order_id', $order->id)->first();
+                if ($download_order == null) {
+                    $download_order = DownloadedOrder::create([
+                        'downloaded_id' => $downloaded->id,
+                        'order_id' => $order->id,
+                    ]);
+                }
+            }
+        }
+
+        $client_name = $client->name;
+        $client_id = $client->id;
+        // dd($client_name);
+        $clientNameParts = explode(' ', $client_name);
+        $firstName = isset($clientNameParts[0]) ? Str::upper(substr($clientNameParts[0], 0, 1)) : '';
+        $namePrefix = $firstName . '-' . $client_id . '-' . '001';
+        // dd($namePrefix);
+        $pdf = PDF::loadView('admin.pages.invoice.all_invoice_order', compact('namePrefix', 'client_id', 'client', 'invoice', 'client_name', 'month_name', 'from', 'till'));
+        return $pdf->stream($client_name . ' ' . $month_name . ' invoice.pdf');
+    }
+
+
+    public function store_invoice_no(Request $req)
+    {
+
+        $controlls = $req->all();
+        $rules = array(
+            "invoice_no" => "required"
+        );
+
+        $validator = Validator::make($controlls, $rules);
+        if ($validator->fails()) {
+            // dd($validator);
+            return redirect()->back()->withErrors($validator)->withInput($controlls);
+        } else {
+
+            $order = Order::find($req->id);
+            $order->invoice_no = $req->invoice_no;
+            $order->save();
+
+            return redirect()->back()->withSuccess('Invoice No Successfully Created');
+        }
+    }
+
+    public function store_invoice(Request $req)
+    {
+        $controlls = $req->all();
+        $rules = array(
+            'invoice_no' => 'required|unique:invoices,invoice_no',
+            "start_date" => "required",
+            "end_date" => "required",
+            "client_id" => "required",
+            "invoice_type" => "required",
+            "status" => "required"
+        );
+
+        $validator = Validator::make($controlls, $rules);
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput($controlls);
+        } else {
+
+            $price = Order::where('client_id', $req->client_id)
+                ->whereBetween('date', [$req->start_date, $req->end_date])
+                ->where('date', '!=', $req->exludedDate)->sum('price');
+            // );
+            // dd($price);
+            $q = Order::where('client_id', $req->client_id)
+                ->whereBetween('date', [$req->start_date, $req->end_date]);
+            if ($req->exludedDate) $q->where('date', '!=', $req->exludedDate);
+            $orders = $q->get();
+
+
+            $startDate = Carbon::parse($req->start_date);
+            $endDate = Carbon::parse($req->end_date);
+            $dateToRemove = Carbon::parse('2024-02-15');
+
+
+            // Check if the date to remove is within the range
+            if ($dateToRemove->between($startDate, $endDate)) {
+                // If the date to remove is within the range, remove it
+                $dates = [];
+                for ($date = $startDate; $date->lte($endDate); $date->addDay()) {
+                    if (!$date->eq($dateToRemove)) {
+                        $dates[] = $date->copy();
+                    }
+                }
+                // $dates now contains all dates from $startDate to $endDate excluding $dateToRemove
+                foreach ($dates as $date) {
+                    echo $date->toDateString() . "\n";
+                }
+            } else {
+                // If the date to remove is not within the range, just display the original range
+                echo "The date to remove is not within the specified range.";
+            }
+            $invoice = new Invoice;
+            $invoice->invoice_no = $req->invoice_no;
+            $invoice->invoice_char = $req->invoice_char;
+            $invoice->invoice_numb = $req->invoice_numb;
+            $invoice->date = $req->start_date;
+            $invoice->end_date = $req->end_date;
+            $invoice->client_id = $req->client_id;
+            $invoice->price = $price;
+            //$invoice->symbol = $order->currency_symbol;
+            $invoice->invoice_type = $req->invoice_type;
+            $invoice->status = $req->status;
+            $invoice->excluding = $req->exludedDate;
+
+            $invoice->save();
+
+            return redirect()->route('admin.invoice')->with(['success' => "Invoice Successfully Created"]);
+        }
+    }
+
+    public function update_invoice(Request $req)
+    {
+        $controlls = $req->all();
+        $rules = array(
+            'invoice_no' => 'required|unique:invoices,invoice_no,' . $req->id,
+            "start_date" => "required",
+            "end_date" => "required",
+            "client_id" => "required",
+            "invoice_type" => "required",
+            "status" => "required"
+
+        );
+
+        $validator = Validator::make($controlls, $rules);
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput($controlls);
+        } else {
+            // $price = Order::where('client_id',$req->client_id)->whereBetween('date', [$req->start_date, $req->end_date])->sum('price');
+            // );
+            // dd($price);
+            $price = Order::where('client_id', $req->client_id)
+                ->whereBetween('date', [$req->start_date, $req->end_date])
+                ->where('date', '!=', $req->exludedDate)->sum('price');
+            // );
+            // dd($price);
+            $q = Order::where('client_id', $req->client_id)
+                ->whereBetween('date', [$req->start_date, $req->end_date]);
+            if ($req->exludedDate) $q->where('date', '!=', $req->exludedDate);
+            $orders = $q->get();
+
+            $invoice = Invoice::find($req->id);
+            $invoice->invoice_no = $req->invoice_no;
+            $invoice->invoice_char = $req->invoice_char;
+            $invoice->invoice_numb = $req->invoice_numb;
+            $invoice->date = $req->start_date;
+            $invoice->end_date = $req->end_date;
+            $invoice->client_id = $req->client_id;
+            $invoice->invoice_type = $req->invoice_type;
+            $invoice->price = $price;
+            //$invoice->symbol = $order->currency_symbol;
+            $invoice->status = $req->status;
+            $invoice->excluding = $req->exludedDate;
+            $invoice->save();
+
+            return redirect()->route('admin.invoice')->with(['success' => "Invoice Successfully Updated"]);
+        }
+    }
+
+    public function update_download_invoice(Request $req)
+    {
+        $controlls = $req->all();
+        $rules = array(
+            // 'invoice_no' => 'required|unique:download_invoices,invoice_no,' . $req->id,
+            // "start_date" => "required",
+            // "end_date" => "required",
+            // "client_id" => "required",
+            // "invoice_type" => "required",
+            "status" => "required"
+
+        );
+
+        $validator = Validator::make($controlls, $rules);
+        if ($validator->fails()) {
+            return redirect()->back()->withErrors($validator)->withInput($controlls);
+        } else {
+            // $price = Order::where('client_id',$req->client_id)->whereBetween('date', [$req->start_date, $req->end_date])->sum('price');
+            // );
+            // dd($price);
+            // $price = Order::where('client_id', $req->client_id)
+            //     ->whereBetween('date', [$req->start_date, $req->end_date])
+            //     ->where('date', '!=', $req->exludedDate)->sum('price');
+            // // );
+            // // dd($price);
+            // $q = Order::where('client_id', $req->client_id)
+            //     ->whereBetween('date', [$req->start_date, $req->end_date]);
+            // if ($req->exludedDate) $q->where('date', '!=', $req->exludedDate);
+            // $orders = $q->get();
+
+            $invoice = Downloaded::find($req->id);
+            // $invoice->invoice_no = $req->invoice_no;
+            // $invoice->invoice_char = $req->invoice_char;
+            // $invoice->invoice_numb = $req->invoice_numb;
+            // $invoice->date = $req->start_date;
+            // $invoice->end_date = $req->end_date;
+            // $invoice->client_id = $req->client_id;
+            // $invoice->invoice_type = $req->invoice_type;
+            // $invoice->price = $price;
+            //$invoice->symbol = $order->currency_symbol;
+            $invoice->status = $req->status;
+            // $invoice->excluding = $req->exludedDate;
+            $invoice->save();
+
+            return redirect()->route('admin.downloaded.invoice')->with(['success' => "Download Invoice Successfully Updated"]);
+        }
+    }
+
+    public function invoice_number($id)
+    {
+        $client = Client::find($id);
+        $data = [];
+        if ($client) {
+            // dd($client);
+            $invoice_name = substr($client->name, 0, 2);
+            $invoice_name = strtoupper($invoice_name);
+            $invoice = Invoice::where('invoice_char', $invoice_name)->latest()->first();
+            // dd($invoice);
+            if ($invoice) {
+                if (strlen($invoice->invoice_numb) == 1) {
+                    if ($invoice->invoice_numb == 9) {
+                        $invoice_numb = $invoice->invoice_numb + 1;
+                        $invoice_no = $invoice_name . '-0' . $invoice_numb;
+                    } else {
+                        $invoice_numb = $invoice->invoice_numb + 1;
+                        $invoice_no = $invoice_name . '-00' . $invoice_numb;
+                    }
+                } elseif (strlen($invoice->invoice_numb) == 2) {
+                    if ($invoice->invoice_numb == 99) {
+                        $invoice_numb = $invoice->invoice_numb + 1;
+                        $invoice_no = $invoice_name . '-' . $invoice_numb;
+                    } else {
+                        $invoice_numb = $invoice->invoice_numb + 1;
+                        $invoice_no = $invoice_name . '-0' . $invoice_numb;
+                    }
+                } elseif (strlen($invoice->invoice_numb) == 3) {
+                    $invoice_numb = $invoice->invoice_numb + 1;
+                    $invoice_no = $invoice_name . '-' . $invoice_numb;
+                }
+            } else {
+                $invoice_no = $invoice_name . '-001';
+                $invoice_numb = 1;
+            }
+
+            $data = ['invoice_char' => $invoice_name, 'invoice_numb' => $invoice_numb, 'invoice_no' => $invoice_no];
+        }
+        return $data;
+    }
+}
