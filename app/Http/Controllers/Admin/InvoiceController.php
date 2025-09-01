@@ -112,118 +112,29 @@ class InvoiceController extends Controller
         return $pdf->stream($client_name . ' ' . $month_name . ' invoice.pdf');
     }
 
-    public function downloaded_view_invoice(Request $request)
-    {
-        $invoices = Downloaded::with('client', 'invoice')->get();
-        // dd($invoices);
+    public function downloaded_view_invoice()
+{
+    // $orders = Order::with(['designer_order', 'client_order'])
+    //     ->where('status', 'Order Completed')
+    //     ->get();
 
-        // $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
-        // // dd($orders);
-        // $clients = Client::all();
-        // // $pag_count = Invoice::count();
-        // $pag_count = request()->get('per_page', 10);
-        // $invoices = Invoice::with('client')->paginate($pag_count);
-        // dd($invoices); 
-        // if ($request->ajax()) {
-        //     $invoices = Invoice::with('client');
-        //     return DataTables::of($invoices)->filter(function ($query) use ($request) {
-        //         if ($request->has('search') && !empty($request->search['value'])) {
-        //             $searchTerm = $request->search['value'];
+    // $clients = Client::all();
 
-        //             $query->where(function ($q) use ($searchTerm) {
-        //                 $q->where('id', 'LIKE', "%{$searchTerm}%")
-        //                     ->orWhere('invoice_no', 'LIKE', "%{$searchTerm}%")
-        //                     ->orWhere('status', 'LIKE', "%{$searchTerm}%")
-        //                     ->orWhereRaw("DATE_FORMAT(date, '%Y-%m-%d') LIKE ?", ["%{$searchTerm}%"])
-        //                     ->orWhereRaw("DATE_FORMAT(end_date, '%Y-%m-%d') LIKE ?", ["%{$searchTerm}%"])
-        //                     ->orWhere('invoice_type', 'LIKE', "%{$searchTerm}%")
-        //                     ->orWhere('price', 'LIKE', "%{$searchTerm}%")
-        //                     ->orWhereHas('client', function ($q) use ($searchTerm) {
-        //                         return $q->where('name', 'LIKE', "%{$searchTerm}%");
-        //                     });
-        //             });
-        //         }
-        //     })
-        //         ->addColumn('client_name', function ($invoice) {
-        //             return $invoice->client->name;
-        //         })
-        //         ->editColumn('date', function ($invoice) {
-        //             return \Carbon\Carbon::parse($invoice->date)->format('Y-m-d');
-        //         })
-        //         ->editColumn('end_date', function ($invoice) {
-        //             return \Carbon\Carbon::parse($invoice->end_date)->format('Y-m-d');
-        //         })
-        //         ->addColumn('action', function ($invoice) {
-        //             $editUrl = route('admin.edit.invoice', ['id' => $invoice->id]);
-        //             $deleteUrl = route('admin.delete.invoice', ['id' => $invoice->id]);
-        //             $printUrl = route('admin.invoice.generate', ['id' => $invoice->id]);
+    $invoices = Downloaded::with(['client', 'invoice', 'downloadedOrder.order'])->get();
 
-        //             return '<a class="fa fa-edit" href="'.$editUrl.'"></a>
-        //                     <a class="fa fa-trash" href="'.$deleteUrl.'"></a>
-        //                     <a class="fa fa-print" href="'.$printUrl.'" target="_blank"></a>';
-        //         })
-        //         ->rawColumns(['action'])
-        //         ->make(true);
-        // }
+    $invoices->each(function ($invoice) {
+        // Agar relation null hai to empty collection le lo
+        $downloadedOrders = $invoice->downloadedOrder ?? collect();
 
-        $orders = Order::with('designer_order', 'client_order')->where('status', 'Order Completed')->get();
-        $clients = Client::all();
-        $invoices = Downloaded::with('client', 'invoice', 'downloadedOrder.order')->get();
-        $invoices->each(
-            fn($invoice) =>
-            $invoice->total_price = $invoice->downloadedOrder->sum(fn($downloadedOrder) => $downloadedOrder->order->price ?? 0)
-        );
+        $invoice->total_price = $downloadedOrders->sum(function ($downloadedOrder) {
+            return optional($downloadedOrder->order)->price ?? 0;
+        });
+    });
 
-        // dd($invoices);
+    // return view('admin.pages.invoice.downloaded', compact('orders', 'clients', 'invoices'));
+        return view('admin.pages.invoice.downloaded', compact('invoices'));
 
-        // if ($request->ajax()) {
-        //     $invoices = Downloaded::with('client', 'invoice')->get();
-
-        //     return DataTables::of($invoices)
-        //         ->filter(function ($query) use ($request) {
-        //             if ($request->has('search') && !empty($request->search['value'])) {
-        //                 $searchTerms = explode(' ', $request->search['value']); // Split search string into terms
-
-        //                 foreach ($searchTerms as $term) {
-        //                     $query->where(function ($q) use ($term) {
-        //                         $q->where('id', 'LIKE', "%{$term}%")
-        //                             ->orWhere('invoice_no', 'LIKE', "%{$term}%")
-        //                             ->orWhere('status', 'LIKE', "%{$term}%")
-        //                             ->orWhereRaw("DATE_FORMAT(date, '%Y-%m-%d') LIKE ?", ["%{$term}%"])
-        //                             ->orWhereRaw("DATE_FORMAT(end_date, '%Y-%m-%d') LIKE ?", ["%{$term}%"])
-        //                             ->orWhere('invoice_type', 'LIKE', "%{$term}%")
-        //                             ->orWhere('price', 'LIKE', "%{$term}%")
-        //                             ->orWhereHas('client', function ($q) use ($term) {
-        //                                 $q->where('name', 'LIKE', "%{$term}%");
-        //                             });
-        //                     });
-        //                 }
-        //             }
-        //         })
-        //         ->addColumn('client_name', function ($invoice) {
-        //             return $invoice->client->name ?? 'N/A';
-        //         })
-        //         ->editColumn('date', function ($invoice) {
-        //             return \Carbon\Carbon::parse($invoice->date)->format('Y-m-d');
-        //         })
-        //         ->editColumn('end_date', function ($invoice) {
-        //             return \Carbon\Carbon::parse($invoice->end_date)->format('Y-m-d');
-        //         })
-        //         ->addColumn('action', function ($invoice) {
-        //             $editUrl = route('admin.edit.invoice', ['id' => $invoice->id]);
-        //             $deleteUrl = route('admin.delete.invoice', ['id' => $invoice->id]);
-        //             $printUrl = route('admin.all.invoice.generate', ['id' => $invoice->id]);
-
-        //             return '<a class="fa fa-edit" href="' . $editUrl . '"></a>
-        //                     <a class="fa fa-trash" href="' . $deleteUrl . '"></a>
-        //                     <a class="fa fa-print" href="' . $printUrl . '" target="_blank"></a>';
-        //         })
-        //         ->rawColumns(['action'])
-        //         ->make(true);
-        // }
-        // return view('admin.pages.invoice.table', compact('orders', 'clients'));
-        return view('admin.pages.invoice.downloaded', compact('orders', 'clients', 'invoices'));
-    }
+}
 
     public function download_invoice(Request $request)
     {
